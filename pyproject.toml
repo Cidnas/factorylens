@@ -4,4 +4,22 @@ version = "0.1.0"
 description = "Anomaly Detection"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.11.1",
+    "pillow>=12.3.0",
+    "theseus",
+    "torch",
+    "torchvision>=0.28.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/theseus",
+]
+
+[tool.uv.sources]
+theseus = { workspace = true, editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
