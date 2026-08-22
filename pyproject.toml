@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.11.1",
+    "openai-agents>=0.22.0",
     "pillow>=12.3.0",
+    "python-dotenv>=1.2.3",
     "theseus",
     "torch",
     "torchvision>=0.28.0",
@@ -19,6 +21,9 @@ members = [
 
 [tool.uv.sources]
 theseus = { workspace = true, editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["visual_inspection"]
 
 [build-system]
 requires = ["hatchling"]

@@ -11,3 +11,4 @@ wheels/
 
 # Local datasets and evaluation artifacts
 data/
+.env

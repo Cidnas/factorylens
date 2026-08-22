@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from anomaly_detection.data import MVTecDataset
+from visual_inspection.data import MVTecDataset
 import matplotlib.pyplot as plt 
 
 PROJECT_ROOT = Path(__file__).parents[1].resolve()

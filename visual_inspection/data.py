@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image
 from torch import Tensor
 from dataclasses import dataclass
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms.functional import to_tensor
 @dataclass(frozen=True)
 class SampleRecord:
@@ -87,6 +87,5 @@ class MVTecDataset(Dataset):
             "mask": mask,
             "label": record.label
         }
-
 
 

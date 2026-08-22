@@ -1,0 +1,6 @@
+{
+"category": "bottle",
+"seed": 42,
+"backbone": "wide_resnet50_2",
+"batch_size": 8
+}
