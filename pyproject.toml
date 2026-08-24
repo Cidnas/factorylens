@@ -20,7 +20,7 @@ members = [
 ]
 
 [tool.uv.sources]
-theseus = { workspace = true, editable = true }
+theseus = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["visual_inspection"]

@@ -22,7 +22,7 @@ for parameter in backbone.parameters():
 
 
 class PatchCore(nn.Module):
-      def __init__(self, backbone=backbone, device=device, threshold = 0.5):
+      def __init__(self, backbone=backbone, device=device, threshold = None):
             super().__init__()
             self.backbone = backbone.to(device)
             self.device = device
@@ -93,7 +93,7 @@ class PatchCore(nn.Module):
                   p=2
             )
 
-            patch_scores  = distances.amin(distances, dim= -1)
+            patch_scores  = torch.amin(distances, dim= -1)
 
             return patch_scores
 
@@ -115,7 +115,12 @@ class PatchCore(nn.Module):
 
       def calibrate_score(self,val_dataloader):
             embd_batches = self.batch_embds(val_dataloader)
-            patche_scores = self.embd_score(embd_batches)
+            patches_score = self.embd_score(embd_batches)
+            images_score = torch.amax(patches_score, dim=-1)
+            p99 = torch.quantile(images_score, 0.99 )
+            self.threshold = p99
+
+
 
 
 
@@ -127,15 +132,18 @@ class PatchCore(nn.Module):
       def predict(self, batch):
             embds = self.make_embeddings(batch)
 
-            score = self.embd_score(embds)
+            patch_score = self.embd_score(embds)
+            image_score = patch_score.amax(patch_score, dim=-1)
+
 
             ## Placeholder
 
-            if score > self.threshold: 
+            if image_score > self.threshold: 
                   anomaly_map = self.anomaly(batch)
 
             return {
-                  "score": score,
+                  "patch_score": patch_score,
+                  "image_score": image_score,
                   "anomaly_map": anomaly_map
             }
 
