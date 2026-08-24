@@ -22,10 +22,11 @@ for parameter in backbone.parameters():
 
 
 class PatchCore(nn.Module):
-      def __init__(self, backbone=backbone, device=device):
+      def __init__(self, backbone=backbone, device=device, threshold = 0.5):
             super().__init__()
             self.backbone = backbone.to(device)
             self.device = device
+            self.threshold = threshold
             self.register_buffer("memory_bank", None)
             self.feature_extractor= feature_extraction.create_feature_extractor(
                   model=self.backbone,
@@ -34,7 +35,6 @@ class PatchCore(nn.Module):
                   "layer3": "layer3"
             }
             ).to(device)
-
 
 
       def make_embeddings(self, features):
@@ -77,25 +77,72 @@ class PatchCore(nn.Module):
 
             return embds
 
+      def coreset(self, embds):
+
+            ## To be implemented
+            return embds
 
 
+      def embd_score(self, embds):
+            """
+            Comparing the embds with the embds in the memory bank
+            """
+            distances = torch.cdist(
+                  x1= embds, 
+                  x2 = self.memory_bank,
+                  p=2
+            )
+
+            patch_scores  = distances.amin(distances, dim= -1)
+
+            return patch_scores
+
+      def batch_embds(self, dataloader):            
+            embd_batches = []
+            with torch.inference_mode():
+                  for batch in dataloader:
+                        images = batch["image"].to(self.device)
+                        features = self.feature_extractor(images)
+                        embds = self.make_embeddings(features)
+                        patch_scores = self.embd_score()
+                        B, P , D = embds.shape
+                        embds = embds.reshape(B*P,D)
+                        embd_batches.append(embds.detach().cpu())
+            
+            embd_batches = torch.cat(embd_batches, dim=0)
+            return embd_batches
+
+
+      def calibrate_score(self,val_dataloader):
+            embd_batches = self.batch_embds(val_dataloader)
+            patche_scores = self.embd_score(embd_batches)
+
+
+
+      def fit(self, train_dataloader):
+            embd_batches = self.batch_embds(train_dataloader)
+            self.memory_bank = self.coreset(embd_batches).to(device)
+
+
+      def predict(self, batch):
+            embds = self.make_embeddings(batch)
+
+            score = self.embd_score(embds)
+
+            ## Placeholder
+
+            if score > self.threshold: 
+                  anomaly_map = self.anomaly(batch)
+
+            return {
+                  "score": score,
+                  "anomaly_map": anomaly_map
+            }
 
             
 
 
-
-
-      def test(self, dataloader):
-            batch = next(iter(dataloader))
-            image = batch["image"].to(self.device) 
-            features = self.feature_extractor(image)
-
-            return features
-      def fit(self, dataloader):
-            for batch in dataloader:
-                  images = batch["image"].to(self.device)
-                  features = self.feature_extractor(images)
-                  embds = self.make_embeddings(features)
+            
                   
 
 
