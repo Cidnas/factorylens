@@ -2,10 +2,13 @@
 
 from pathlib import Path
 from PIL import Image
-from torch import Tensor
+import torch
 from dataclasses import dataclass
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from torchvision.transforms.functional import to_tensor
+from torchvision.transforms import v2
+from torchvision import tv_tensors
+
 @dataclass(frozen=True)
 class SampleRecord:
       image_path: Path
@@ -58,7 +61,7 @@ def load_mask(path:Path|None, size:tuple[int,int]):
 
 
 class MVTecDataset(Dataset):
-    def __init__(self, root, category, split, transform =None):
+    def __init__(self, root, category, split, transform ):
         self.root = root
         self.category = category
         self.split = split
@@ -75,9 +78,8 @@ class MVTecDataset(Dataset):
         mask = load_mask(record.mask_path, image.size)
         image = to_tensor(image)
         mask = to_tensor(mask).squeeze(0).bool()
-
-        if self.transform is not None:
-          image, mask = self.transform(image, mask)
+        image, mask = tv_tensors.Image(image), tv_tensors.Mask(mask)
+        image, mask = self.transform(image, mask)
 
 
 
@@ -89,3 +91,13 @@ class MVTecDataset(Dataset):
         }
 
 
+def build_transform(image_size:int):
+    return v2.Compose([
+        v2.Resize((image_size, image_size)),
+        v2.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+        )
+    ]
+
+    )

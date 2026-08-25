@@ -1,9 +1,10 @@
 """One controlled experiment."""
 import json
-from visual_inspection.data import MVTecDataset
+from visual_inspection.data import MVTecDataset, build_transform
 from pathlib import Path
 import torch 
 from dataclasses import dataclass
+from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 
 # Paths
@@ -20,6 +21,7 @@ class ExperimentConfig:
     seed: int
     backbone: str
     batch_size: int
+    image_size: int
 
 
 
@@ -34,36 +36,39 @@ def load_config(file_name):
 class ExperimentRunner:
     def __init__(self,config:ExperimentConfig ):
         self.config = config 
-        self.generator = torch.Generator.manual_seed(config['seed'])
+        generator = torch.Generator().manual_seed(config.seed)
+        transform= build_transform(image_size=config.image_size)
         dataset = MVTecDataset(
             root = DATA_ROOT,
             category=config.category,
-            split = "train"
+            split = "train", 
+            transform= transform
         )
 
-        train_dataset, val_dataset = random_split(
+        self.train_dataset, self.val_dataset = random_split(
             dataset,
             [0.8, 0.2],
-            generator=self.generator
+            generator=generator
         )
 
         
         self.test_dataset = MVTecDataset(
             root = DATA_ROOT,
             category=config.category,
-            split = "test"
+            split = "test", 
+            transform=transform
         )
 
-        self.train_dataloader(self.train_dataset, 
+        self.train_dataloader= DataLoader(self.train_dataset, 
                               config.batch_size,
                               shuffle= False)
 
-        self.val_dataloader(self.val_dataset, 
+        self.val_dataloader= DataLoader(self.val_dataset, 
                             config.batch_size, 
                             shuffle=False)
 
 
-        self.test_dataloader(self.test_dataset, 
+        self.test_dataloader= DataLoader(self.test_dataset, 
                               config.batch_size,
                               shuffle= False)
     def run(self):

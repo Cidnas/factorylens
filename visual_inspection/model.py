@@ -104,9 +104,6 @@ class PatchCore(nn.Module):
                         images = batch["image"].to(self.device)
                         features = self.feature_extractor(images)
                         embds = self.make_embeddings(features)
-                        patch_scores = self.embd_score()
-                        B, P , D = embds.shape
-                        embds = embds.reshape(B*P,D)
                         embd_batches.append(embds.detach().cpu())
             
             embd_batches = torch.cat(embd_batches, dim=0)
@@ -126,6 +123,8 @@ class PatchCore(nn.Module):
 
       def fit(self, train_dataloader):
             embd_batches = self.batch_embds(train_dataloader)
+            N,P,D = embd_batches.shape
+            embd_batches =  embd_batches.reshape(N*P, D)
             self.memory_bank = self.coreset(embd_batches).to(device)
 
 
