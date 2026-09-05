@@ -12,3 +12,5 @@ wheels/
 # Local datasets and evaluation artifacts
 data/
 .env
+/visual_inspection/traces
+

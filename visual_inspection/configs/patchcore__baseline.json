@@ -3,5 +3,7 @@
 "seed": 42,
 "backbone": "wide_resnet50_2",
 "batch_size": 8,
-"image_size": 224
+"image_size": 224,
+"coreset_ratio": 0.001,
+"device": "cuda"
 }
