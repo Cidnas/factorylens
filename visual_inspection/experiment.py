@@ -110,6 +110,16 @@ class ExperimentRunner:
     def run(self):
         self._set_model()
         self.model.fit(self.train_dataloader, self.config.coreset_ratio)
+        # create prediction threshold
+        self.model.calibrate_score(self.val_dataloader)
+        # make an eval prediction
+        avg_err = self.model.evaluation(self.test_dataloader)
+
+        print (f"Average test error: {avg_err}")
+
+
+
+
 
 
         

@@ -154,15 +154,6 @@ class PatchCore(nn.Module):
                         # reprs has shape (representatives, D), while new_repr is (D, 1).
                         reprs = torch.cat((reprs, new_repr), dim = 0)
 
-
-
-
-
-
-
-
-
-                  
             return reprs
 
 
@@ -230,29 +221,58 @@ class PatchCore(nn.Module):
             self.memory_bank = self.coreset(embd_batches, ratio).to(self.device)
 
 
-      def predict(self, batch):
+      def predict(self, images):
             # batch is currently passed directly to make_embeddings, so its
             # expected layout is a feature dict with layer2/layer3 tensors.
             # embds: (B, P, 1024).
-            embds = self.make_embeddings(batch)
+            features = self.feature_extractor(images)
+            embds = self.make_embeddings(features)
 
             # patch_score: (B, P).
-            patch_score = self.embd_score(embds)
+            patches_score = self.embd_score(embds)
             # image_score is intended to reduce the P dimension to shape (B,).
-            image_score = patch_score.amax(patch_score, dim=-1)
+            image_score = patches_score.amax( dim=-1)
+
+
+            predictions = image_score > self.threshold
+
+
 
 
             ## Placeholder
 
-            if image_score > self.threshold: 
-                  # anomaly_map: expected to retain a per-image spatial score map.
-                  anomaly_map = self.anomaly(batch)
-
             return {
-                  "patch_score": patch_score,
-                  "image_score": image_score,
-                  "anomaly_map": anomaly_map
+                  "patches_score": patches_score,
+                  "image_score": image_score , 
+                  "predictions": predictions.int()   
             }
+
+      def evaluation(self, test_dataloader):
+            avg_penality = 0 
+            n = 0 
+            with torch.inference_mode():
+                  for batch in test_dataloader:
+                        images = batch['image'].to(self.device)
+                        predict_info = self.predict(images)
+                        predicted_labels = predict_info['predictions']
+                        labels = batch['label'].to(self.device)
+                        avg_penality += (labels != predicted_labels).sum().item()
+                        n += images.shape[0]
+                  assert n!=0
+                  avg_penality /= n
+
+            
+
+            return avg_penality
+
+            
+
+
+
+                  
+
+
+
 
             
 
