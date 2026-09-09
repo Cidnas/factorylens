@@ -7,17 +7,19 @@ import torch.nn.functional as F
 import random
 
 from tqdm import tqdm 
+from visual_inspection.telemetry import StageTracer
 
 
 
 
 class PatchCore(nn.Module):
-      def __init__(self, backbone, device,tracer, threshold = None):
+      def __init__(self, backbone, device,tracer, threshold = None, seed=None):
             super().__init__()
             self.backbone = backbone.to(device)
             self.device = device
-            self.tracer = tracer
-            self.cuda_events = {}
+            self.telemetry = StageTracer(tracer, device)
+            # Keep coreset randomness independent of telemetry's trace IDs.
+            self.coreset_rng = random.Random(seed)
             # threshold: scalar-like value used to compare against an image score.
             self.threshold = threshold
             # memory_bank: initially None; after fit, floating tensor (M, 1024),
@@ -30,14 +32,6 @@ class PatchCore(nn.Module):
                   "layer3": "layer3"
             }
             ).to(device)
-
-
-      def record_cuda_event(self, name):
-            # Queue a timestamp marker without waiting for the GPU.
-            if torch.device(self.device).type == "cuda":
-                  event = torch.cuda.Event(enable_timing=True)
-                  event.record(torch.cuda.current_stream(self.device))
-                  self.cuda_events[name] = event
 
 
       def make_embeddings(self, features):
@@ -109,7 +103,7 @@ class PatchCore(nn.Module):
             # Output reprs is intended to contain about ratio*M_all rows.
             embds_idx = list(range(embds.shape[0]))
             # initial_rep_idx: Python int in [0, M_all).
-            initial_rep_idx = random.choice(embds_idx)
+            initial_rep_idx = self.coreset_rng.choice(embds_idx)
             # reprs: (1, D).
             reprs = embds[initial_rep_idx].unsqueeze(0)
 
@@ -120,27 +114,20 @@ class PatchCore(nn.Module):
             # n: Python int, requested number of representatives.
             n = int(embds.shape[0] * ratio)
 
-            with self.tracer.start_as_current_span("coreset selection") as span:
-                  span.set_attribute("memory_bank.size", embds.shape[0])
-                  span.set_attribute("coreset.ratio", ratio)
-                  span.set_attribute("embedding.dimension", embds.shape[1])
-                  span.set_attribute("device", str(embds.device))
+            for _ in tqdm(range(n-1), desc="Building coreset"):
+                  # embds: (M_all, D); reprs[-1]: (D,).
+                  new_dist = torch.cdist(embds, reprs[-1].unsqueeze(0), p=2)
 
-                  for _ in tqdm(range(n-1), desc="Building coreset"):
-                        # embds: (M_all, D); reprs[-1]: (D,).
-                        new_dist = torch.cdist(embds, reprs[-1].unsqueeze(0), p=2)
+                  # Both distance tensors are (M_all, 1).
+                  dist = torch.minimum(dist, new_dist)
+                  # max_idx: scalar integer Tensor indexing the farthest embedding.
+                  max_idx = dist.argmax()
 
+                  # embds[max_idx] has shape (D,); unsqueeze(0) makes (1, D).
+                  new_repr = embds[max_idx].unsqueeze(0)
 
-                        # Both distance tensors are (M_all, 1).
-                        dist = torch.minimum(dist, new_dist)
-                        # max_idx: scalar integer Tensor indexing the farthest embedding.
-                        max_idx = dist.argmax()
-
-                        # embds[max_idx] has shape (D,); unsqueeze(0) makes (1, D).
-                        new_repr = embds[max_idx].unsqueeze(0)
-
-                        # Add one representative row to (representatives, D).
-                        reprs = torch.cat((reprs, new_repr), dim = 0)
+                  # Add one representative row to (representatives, D).
+                  reprs = torch.cat((reprs, new_repr), dim = 0)
 
             return reprs
 
@@ -200,18 +187,20 @@ class PatchCore(nn.Module):
 
 
       def fit(self, train_dataloader, ratio):
-            self.cuda_events.clear()
             # embd_batches: (N, P, D), normally D=1024.
-            self.record_cuda_event("feature_extraction.start")
-            embd_batches = self.batch_embds(train_dataloader)
-            self.record_cuda_event("feature_extraction.end")
+            with self.telemetry.stage("feature extraction"):
+                  embd_batches = self.batch_embds(train_dataloader)
             N,P,D = embd_batches.shape
             # embd_batches: (N*P, D), pooling every training-image patch.
             embd_batches =  embd_batches.reshape(N*P, D)
             # memory_bank: intended shape (M, D), where M is the coreset size.
-            self.record_cuda_event("coreset.start")
-            self.memory_bank = self.coreset(embd_batches, ratio).to(self.device)
-            self.record_cuda_event("coreset.end")
+            with self.telemetry.stage("coreset selection") as span:
+                  span.set_attribute("embedding.count", N * P)
+                  span.set_attribute("embedding.dimension", D)
+                  span.set_attribute("coreset.ratio", ratio)
+                  span.set_attribute("device", str(self.device))
+                  self.memory_bank = self.coreset(embd_batches, ratio).to(self.device)
+                  span.set_attribute("memory_bank.size", self.memory_bank.shape[0])
 
 
       def predict(self, images):

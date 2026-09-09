@@ -1,7 +1,6 @@
 """One controlled experiment."""
 import json
 import argparse
-import random
 import subprocess
 import time
 from visual_inspection.data import MVTecDataset, build_transform
@@ -107,44 +106,43 @@ class ExperimentRunner:
         self.model = PatchCore(
             backbone,
             self.config.device,
-            self.tracer
+            self.tracer,
+            seed=self.config.seed,
         )
 
 
 
     def run(self, run_id=None):
-        # The split has its own seeded generator; coreset uses Python random.
-        random.seed(self.config.seed)
+        run_id = run_id or str(uuid.uuid4())
+        with self.tracer.start_as_current_span("experiment", attributes={
+            "run.id": run_id, "category": self.config.category,
+            "device": self.config.device,
+        }):
+            return self._run(run_id)
+
+    def _run(self, run_id):
+        # The split and coreset each have their own seeded generator.
         torch.manual_seed(self.config.seed)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
-        run_id = run_id or str(uuid.uuid4())
         started = time.perf_counter()
         self._set_model()
-        self.model.fit(self.train_dataloader, self.config.coreset_ratio)
-        # create prediction threshold
-        self.model.calibrate_score(self.val_dataloader)
-        # make an eval prediction
-        self.model.record_cuda_event("evaluation.start")
-        evaluation = self.model.evaluation(self.test_dataloader)
-        self.model.record_cuda_event("evaluation.end")
-        if torch.device(self.config.device).type == "cuda":
-            torch.cuda.synchronize(self.config.device)
+        try:
+            self.model.fit(self.train_dataloader, self.config.coreset_ratio)
+            self.model.calibrate_score(self.val_dataloader)
+            with self.model.telemetry.stage("evaluation") as span:
+                evaluation = self.model.evaluation(self.test_dataloader)
+                span.set_attribute("image.count", len(self.test_dataset))
+                span.set_attribute("image.auroc", evaluation["auroc_score"])
+        finally:
+            self.model.telemetry.finish()
         elapsed = time.perf_counter() - started
-        # Read completed markers only after the final wait. Intervals include gaps.
-        cuda_stage_elapsed_ms = {}
-        if self.model.cuda_events:
-            for stage in ("feature_extraction", "coreset", "evaluation"):
-                start = self.model.cuda_events[f"{stage}.start"]
-                end = self.model.cuda_events[f"{stage}.end"]
-                cuda_stage_elapsed_ms[stage] = start.elapsed_time(end)
         image_results = evaluation.pop("image_results")
         result = {
             "run_id": run_id,
             "config": asdict(self.config),
             "metrics": evaluation,
             "duration_seconds": elapsed,
-            "cuda_stage_elapsed_ms": cuda_stage_elapsed_ms,
             "memory_bank_size": self.model.memory_bank.shape[0],
             "threshold": self.model.threshold.item(),
             "split_sizes": {

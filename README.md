@@ -32,19 +32,20 @@ Each successful run returns a summary and saves two files under `runs/<run_id>/`
 - `predictions.json`: each test image's dataset-relative path, defect type, true
   label and raw anomaly score. Larger scores mean more anomalous.
 
-`result.json` also contains `cuda_stage_elapsed_ms`: CUDA-event intervals for
-training feature extraction, coreset selection and test evaluation. Markers are
-queued without waiting at stage boundaries; their timings are read after the
-existing final GPU synchronization. These intervals include gaps between GPU
-operations, not just active computation. They exclude calibration and need not
-sum to the whole-run `duration_seconds`. CPU runs save an empty dictionary.
-These measurements are saved in the result; the existing trace is unchanged.
+Stage timings live only in OpenTelemetry traces. The `experiment` span contains
+`feature extraction`, `coreset selection` and `evaluation` child spans. Each CUDA
+stage records `cuda.elapsed_ms`; CPU stages have ordinary span timing only.
+The small `StageTracer` helper in `telemetry.py` queues markers without waiting,
+collects their timings once at the end, and exports spans with the original stage
+end timestamps. CUDA intervals include idle gaps, not just active computation.
+Exceptions are recorded on their spans. Calibration is not separately timed.
 
 The command-line run's trace uses the same ID in `visual_inspection/traces/`.
 Generated runs and traces are ignored by Git. Failed runs raise an exception;
 they do not currently write a result summary. Model weights are not saved.
 
 The seed controls the data split, Python's coreset choice and PyTorch randomness.
+Coreset has its own random generator, so adding telemetry spans cannot change it.
 cuDNN uses deterministic convolution selection. This is intended for repeated
 runs in the same environment, not a promise of identical results across hardware
 or library versions. A dirty Git flag means the commit alone does not identify
@@ -62,6 +63,7 @@ Focused metric and storage checks:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -p test_evaluation_metrics.py -v
+.venv/bin/python -m unittest discover -s tests -p test_telemetry.py -v
 ```
 
 GPU validation on 2026-09-09 (GTX 1660 SUPER, seed 42, image size 224,
