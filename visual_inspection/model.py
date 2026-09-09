@@ -231,10 +231,10 @@ class PatchCore(nn.Module):
             # patch_score: (B, P).
             patches_score = self.embd_score(embds)
             # image_score is intended to reduce the P dimension to shape (B,).
-            image_score = patches_score.amax( dim=-1)
+            images_score = patches_score.amax( dim=-1)
 
 
-            predictions = image_score > self.threshold
+            predictions = images_score > self.threshold
 
 
 
@@ -243,27 +243,65 @@ class PatchCore(nn.Module):
 
             return {
                   "patches_score": patches_score,
-                  "image_score": image_score , 
+                  "images_score": images_score , 
                   "predictions": predictions.int()   
             }
 
       def evaluation(self, test_dataloader):
-            avg_penality = 0 
-            n = 0 
+            # avg_penality = 0 
+            # n = 0 
             with torch.inference_mode():
+                  predictions = torch.empty(0,2).to(self.device)
                   for batch in test_dataloader:
                         images = batch['image'].to(self.device)
                         predict_info = self.predict(images)
-                        predicted_labels = predict_info['predictions']
+                        # predicted_labels = predict_info['predictions']
                         labels = batch['label'].to(self.device)
-                        avg_penality += (labels != predicted_labels).sum().item()
-                        n += images.shape[0]
-                  assert n!=0
-                  avg_penality /= n
+
+                        images_score = predict_info['images_score']
+
+                        # combine images_score and predicted labels into one tensor, then after each batch concat along the first dim
+                        new_predictions = torch.cat((images_score.unsqueeze(1), labels.unsqueeze(1)), dim = 1)
+
+                        predictions = torch.cat((predictions, new_predictions), dim = 0)
+
+                        # avg_penality += (labels != predicted_labels).sum().item()
+                  #       # n += images.shape[0]
+                  # assert n!=0
+                  # avg_penality /= n
+
+                  # calculate AUROC
+                  normal = predictions[predictions[:,1] == 0,0]
+                  anomalous = predictions[predictions[:,1] == 1, 0]
+
+                  m = normal.shape[0] * anomalous.shape[0]
+
+                  if m==0:
+                        raise ValueError("AUROC requires both normal and anomalous images.")
+
+                  auroc_counter = 0
+
+                  for x in normal:
+                        for y in anomalous:
+                              if x < y:
+                                    auroc_counter += 1
+                              elif x==y:
+                                    auroc_counter += 0.5
+
+                  auroc_score = auroc_counter / m 
+
+                  eval_info = {
+                        "auroc_score" : auroc_score
+                  }
+
+                  return eval_info
+            
+                              
+
 
             
 
-            return avg_penality
+            return 
 
             
 
