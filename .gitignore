@@ -13,4 +13,4 @@ wheels/
 data/
 .env
 /visual_inspection/traces
-
+/runs/

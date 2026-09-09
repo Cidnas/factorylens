@@ -1,15 +1,19 @@
 """One controlled experiment."""
 import json
+import argparse
+import random
+import subprocess
+import time
 from visual_inspection.data import MVTecDataset, build_transform
 from pathlib import Path
 import torch 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 from visual_inspection.model import PatchCore
+from visual_inspection.storage import ExperimentStore
 
 from torchvision.models import (
-      feature_extraction,
       Wide_ResNet50_2_Weights,
       wide_resnet50_2,
   )
@@ -92,7 +96,8 @@ class ExperimentRunner:
                               shuffle= False)
 
     def _set_model(self):
-        # TODO: create backbone from config
+        if self.config.backbone != "wide_resnet50_2":
+            raise ValueError("Only wide_resnet50_2 is supported by the current embeddings.")
         backbone = wide_resnet50_2(weights=Wide_ResNet50_2_Weights.DEFAULT)
         backbone.eval()
 
@@ -107,15 +112,49 @@ class ExperimentRunner:
 
 
 
-    def run(self):
+    def run(self, run_id=None):
+        # The split has its own seeded generator; coreset uses Python random.
+        random.seed(self.config.seed)
+        torch.manual_seed(self.config.seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        run_id = run_id or str(uuid.uuid4())
+        started = time.perf_counter()
         self._set_model()
         self.model.fit(self.train_dataloader, self.config.coreset_ratio)
         # create prediction threshold
         self.model.calibrate_score(self.val_dataloader)
         # make an eval prediction
-        avg_err = self.model.evaluation(self.test_dataloader)
-
-        print (f"Average test error: {avg_err}")
+        evaluation = self.model.evaluation(self.test_dataloader)
+        if torch.device(self.config.device).type == "cuda":
+            torch.cuda.synchronize(self.config.device)
+        elapsed = time.perf_counter() - started
+        image_results = evaluation.pop("image_results")
+        result = {
+            "run_id": run_id,
+            "config": asdict(self.config),
+            "metrics": evaluation,
+            "duration_seconds": elapsed,
+            "memory_bank_size": self.model.memory_bank.shape[0],
+            "threshold": self.model.threshold.item(),
+            "split_sizes": {
+                "train": len(self.train_dataset),
+                "validation": len(self.val_dataset),
+                "test": len(self.test_dataset),
+            },
+            "git_commit": subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True).strip(),
+            "git_dirty": bool(subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=PROJECT_ROOT, text=True).strip()),
+            "torch_version": str(torch.__version__),
+            "device_name": (torch.cuda.get_device_name(self.config.device)
+                            if torch.device(self.config.device).type == "cuda" else "cpu"),
+        }
+        store = ExperimentStore(PROJECT_ROOT / "runs")
+        output_path = store.save(run_id, result, image_results)
+        print(f"Image AUROC: {evaluation['auroc_score']:.6f}")
+        print(f"Saved run: {output_path}")
+        return result
 
 
 
@@ -126,9 +165,19 @@ class ExperimentRunner:
         
 
 if __name__=="__main__":
-    config = load_config(file_name=CONFIG__ROOT/"patchcore__baseline.json")
+    parser = argparse.ArgumentParser(description="Run one MVTec experiment.")
+    parser.add_argument("--config", default="patchcore__baseline.json")
+    parser.add_argument("--category")
+    parser.add_argument("--coreset-ratio", type=float)
+    args = parser.parse_args()
+    config = load_config(args.config)
+    if args.category is not None:
+        config = replace(config, category=args.category)
+    if args.coreset_ratio is not None:
+        config = replace(config, coreset_ratio=args.coreset_ratio)
     provider = TracerProvider()
-    run_id =  uuid.uuid4()
+    run_id = str(uuid.uuid4())
+    TRACE_ROOT.mkdir(parents=True, exist_ok=True)
     trace_file = open(TRACE_ROOT/f"traces_{run_id}", "w")
     exporter = ConsoleSpanExporter(out=trace_file)
     processor = SimpleSpanProcessor(exporter)
@@ -136,6 +185,8 @@ if __name__=="__main__":
     trace.set_tracer_provider(provider)
     tracer = trace.get_tracer(__name__)
     experimentrunner = ExperimentRunner(config =config, tracer= tracer )
-    experimentrunner.run()
-
-    trace_file.close()
+    try:
+        experimentrunner.run(run_id=run_id)
+    finally:
+        provider.shutdown()
+        trace_file.close()

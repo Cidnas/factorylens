@@ -1,31 +1,12 @@
 from torchvision.models import (
       feature_extraction,
-      Wide_ResNet50_2_Weights,
-      wide_resnet50_2,
   )
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-import time
 from tqdm import tqdm 
-
-from opentelemetry import trace 
-from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-
-
-# backbone: nn.Module; input images are floating tensors shaped (B, 3, H, W).
-backbone = wide_resnet50_2(
-      weights=Wide_ResNet50_2_Weights.DEFAULT
-  )
-
-# device: torch.device; parameters, inputs, and produced features must share it.
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-backbone.eval()
-
-for parameter in backbone.parameters():
-      parameter.requires_grad = False
 
 
 
@@ -138,20 +119,18 @@ class PatchCore(nn.Module):
 
                   for _ in tqdm(range(n-1), desc="Building coreset"):
                         # embds: (M_all, D); reprs[-1]: (D,).
-                        # Profiling code
                         new_dist = torch.cdist(embds, reprs[-1].unsqueeze(0), p=2)
 
 
-                        # Profiling code
-                        # dist/new_dist would need matching shapes for elementwise minimum.
+                        # Both distance tensors are (M_all, 1).
                         dist = torch.minimum(dist, new_dist)
                         # max_idx: scalar integer Tensor indexing the farthest embedding.
                         max_idx = dist.argmax()
 
-                        # embds[max_idx] has shape (D,); unsqueeze(1) makes (D, 1).
+                        # embds[max_idx] has shape (D,); unsqueeze(0) makes (1, D).
                         new_repr = embds[max_idx].unsqueeze(0)
 
-                        # reprs has shape (representatives, D), while new_repr is (D, 1).
+                        # Add one representative row to (representatives, D).
                         reprs = torch.cat((reprs, new_repr), dim = 0)
 
             return reprs
@@ -222,8 +201,7 @@ class PatchCore(nn.Module):
 
 
       def predict(self, images):
-            # batch is currently passed directly to make_embeddings, so its
-            # expected layout is a feature dict with layer2/layer3 tensors.
+            # images: (B, 3, H, W), already transformed and on self.device.
             # embds: (B, P, 1024).
             features = self.feature_extractor(images)
             embds = self.make_embeddings(features)
@@ -239,7 +217,6 @@ class PatchCore(nn.Module):
 
 
 
-            ## Placeholder
 
             return {
                   "patches_score": patches_score,
@@ -248,27 +225,30 @@ class PatchCore(nn.Module):
             }
 
       def evaluation(self, test_dataloader):
-            # avg_penality = 0 
-            # n = 0 
             with torch.inference_mode():
-                  predictions = torch.empty(0,2).to(self.device)
+                  predictions = torch.empty(0,2)
+                  image_results = []
                   for batch in test_dataloader:
                         images = batch['image'].to(self.device)
                         predict_info = self.predict(images)
-                        # predicted_labels = predict_info['predictions']
-                        labels = batch['label'].to(self.device)
+                        labels = batch['label'].cpu()
 
-                        images_score = predict_info['images_score']
+                        images_score = predict_info['images_score'].cpu()
 
-                        # combine images_score and predicted labels into one tensor, then after each batch concat along the first dim
+                        # Store scores and true labels on CPU for evaluation.
                         new_predictions = torch.cat((images_score.unsqueeze(1), labels.unsqueeze(1)), dim = 1)
 
                         predictions = torch.cat((predictions, new_predictions), dim = 0)
 
-                        # avg_penality += (labels != predicted_labels).sum().item()
-                  #       # n += images.shape[0]
-                  # assert n!=0
-                  # avg_penality /= n
+                        for path, defect, label, score in zip(
+                              batch['image_path'], batch['defect_type'],
+                              labels.tolist(), images_score.tolist(), strict=True):
+                              image_results.append({
+                                    "image_path": path,
+                                    "defect_type": defect,
+                                    "label": label,
+                                    "image_score": score,
+                              })
 
                   # calculate AUROC
                   normal = predictions[predictions[:,1] == 0,0]
@@ -279,46 +259,15 @@ class PatchCore(nn.Module):
                   if m==0:
                         raise ValueError("AUROC requires both normal and anomalous images.")
 
-                  auroc_counter = 0
-
-                  for x in normal:
-                        for y in anomalous:
-                              if x < y:
-                                    auroc_counter += 1
-                              elif x==y:
-                                    auroc_counter += 0.5
-
-                  auroc_score = auroc_counter / m 
+                  # Same pairwise rule, evaluated together on CPU: ties count half.
+                  # This temporary matrix is small for MVTec's per-category test sets.
+                  wins = (normal[:, None] < anomalous[None, :]).sum().item()
+                  ties = (normal[:, None] == anomalous[None, :]).sum().item()
+                  auroc_score = (wins + 0.5 * ties) / m
 
                   eval_info = {
-                        "auroc_score" : auroc_score
+                        "auroc_score" : auroc_score,
+                        "image_results": image_results,
                   }
 
                   return eval_info
-            
-                              
-
-
-            
-
-            return 
-
-            
-
-
-
-                  
-
-
-
-
-            
-
-
-            
-                  
-
-
-
-
-

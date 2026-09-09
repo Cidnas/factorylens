@@ -87,7 +87,9 @@ class MVTecDataset(Dataset):
         return  {
             "image": image,
             "mask": mask,
-            "label": record.label
+            "label": record.label,
+            "image_path": str(record.image_path.relative_to(self.root)),
+            "defect_type": record.defect_type,
         }
 
 
