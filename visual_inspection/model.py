@@ -17,6 +17,7 @@ class PatchCore(nn.Module):
             self.backbone = backbone.to(device)
             self.device = device
             self.tracer = tracer
+            self.cuda_events = {}
             # threshold: scalar-like value used to compare against an image score.
             self.threshold = threshold
             # memory_bank: initially None; after fit, floating tensor (M, 1024),
@@ -29,6 +30,14 @@ class PatchCore(nn.Module):
                   "layer3": "layer3"
             }
             ).to(device)
+
+
+      def record_cuda_event(self, name):
+            # Queue a timestamp marker without waiting for the GPU.
+            if torch.device(self.device).type == "cuda":
+                  event = torch.cuda.Event(enable_timing=True)
+                  event.record(torch.cuda.current_stream(self.device))
+                  self.cuda_events[name] = event
 
 
       def make_embeddings(self, features):
@@ -191,13 +200,18 @@ class PatchCore(nn.Module):
 
 
       def fit(self, train_dataloader, ratio):
+            self.cuda_events.clear()
             # embd_batches: (N, P, D), normally D=1024.
+            self.record_cuda_event("feature_extraction.start")
             embd_batches = self.batch_embds(train_dataloader)
+            self.record_cuda_event("feature_extraction.end")
             N,P,D = embd_batches.shape
             # embd_batches: (N*P, D), pooling every training-image patch.
             embd_batches =  embd_batches.reshape(N*P, D)
             # memory_bank: intended shape (M, D), where M is the coreset size.
+            self.record_cuda_event("coreset.start")
             self.memory_bank = self.coreset(embd_batches, ratio).to(self.device)
+            self.record_cuda_event("coreset.end")
 
 
       def predict(self, images):

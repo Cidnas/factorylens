@@ -32,6 +32,14 @@ Each successful run returns a summary and saves two files under `runs/<run_id>/`
 - `predictions.json`: each test image's dataset-relative path, defect type, true
   label and raw anomaly score. Larger scores mean more anomalous.
 
+`result.json` also contains `cuda_stage_elapsed_ms`: CUDA-event intervals for
+training feature extraction, coreset selection and test evaluation. Markers are
+queued without waiting at stage boundaries; their timings are read after the
+existing final GPU synchronization. These intervals include gaps between GPU
+operations, not just active computation. They exclude calibration and need not
+sum to the whole-run `duration_seconds`. CPU runs save an empty dictionary.
+These measurements are saved in the result; the existing trace is unchanged.
+
 The command-line run's trace uses the same ID in `visual_inspection/traces/`.
 Generated runs and traces are ignored by Git. Failed runs raise an exception;
 they do not currently write a result summary. Model weights are not saved.
