@@ -28,16 +28,19 @@ class StageTracer:
             if end is not None:
                 end.record(torch.cuda.current_stream(self.device))
             # Preserve the stage boundary, even though export happens later.
-            self.pending.append((span, start, end, time.time_ns()))
+            self.pending.append((name, span, start, end, time.time_ns()))
 
     def finish(self):
+        timings = {}
         try:
             if self.pending and self.device.type == "cuda":
                 torch.cuda.synchronize(self.device)
-            for span, start, end, _ in self.pending:
+            for name, span, start, end, _ in self.pending:
                 if start is not None:
-                    span.set_attribute("cuda.elapsed_ms", start.elapsed_time(end))
+                    timings[name] = start.elapsed_time(end)
+                    span.set_attribute("cuda.elapsed_ms", timings[name])
         finally:
-            for span, _, _, end_time in self.pending:
+            for _, span, _, _, end_time in self.pending:
                 span.end(end_time=end_time)
             self.pending.clear()
+        return timings

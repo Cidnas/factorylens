@@ -32,7 +32,9 @@ Each successful run returns a summary and saves two files under `runs/<run_id>/`
 - `predictions.json`: each test image's dataset-relative path, defect type, true
   label and raw anomaly score. Larger scores mean more anomalous.
 
-Stage timings live only in OpenTelemetry traces. The `experiment` span contains
+Stage timings are saved in `result.json` under `cuda_stage_elapsed_ms`, keyed by
+span name (an empty dictionary on CPU), and in OpenTelemetry traces.
+The `experiment` span contains
 `feature extraction`, `coreset selection` and `evaluation` child spans. Each CUDA
 stage records `cuda.elapsed_ms`; CPU stages have ordinary span timing only.
 The small `StageTracer` helper in `telemetry.py` queues markers without waiting,

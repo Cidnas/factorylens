@@ -135,7 +135,7 @@ class ExperimentRunner:
                 span.set_attribute("image.count", len(self.test_dataset))
                 span.set_attribute("image.auroc", evaluation["auroc_score"])
         finally:
-            self.model.telemetry.finish()
+            cuda_stage_elapsed_ms = self.model.telemetry.finish()
         elapsed = time.perf_counter() - started
         image_results = evaluation.pop("image_results")
         result = {
@@ -143,6 +143,7 @@ class ExperimentRunner:
             "config": asdict(self.config),
             "metrics": evaluation,
             "duration_seconds": elapsed,
+            "cuda_stage_elapsed_ms": cuda_stage_elapsed_ms,
             "memory_bank_size": self.model.memory_bank.shape[0],
             "threshold": self.model.threshold.item(),
             "split_sizes": {
