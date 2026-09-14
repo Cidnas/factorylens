@@ -3,6 +3,8 @@ name = "factorylens"
 version = "0.1.0"
 description = "Industrial visual anomaly detection experiments"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.11.1",

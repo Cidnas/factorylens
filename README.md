@@ -118,3 +118,8 @@ choices, that test set is no longer an untouched final evaluation.
 
 Pixel-level evaluation and saved model checkpoints are not implemented yet.
 Agent-driven experiment search is planned as a separate project using this engine.
+
+## License
+
+FactoryLens code is licensed under the [MIT License](LICENSE).
+Datasets, pretrained weights, and dependencies remain subject to their own terms.
