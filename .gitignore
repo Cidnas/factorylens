@@ -14,3 +14,4 @@ data/
 .env
 /visual_inspection/traces
 /runs/
+AGENTS.md

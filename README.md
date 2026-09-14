@@ -1,84 +1,120 @@
-# Anomaly Detection
+# FactoryLens
 
-A small agent-controlled experiment harness for MVTec AD.
+Configurable industrial visual anomaly detection experiments on MVTec AD, using a PyTorch
+implementation of PatchCore. Each run records detection quality, execution time,
+and the configuration behind the result.
 
-The first version only defines the main boundaries:
+## What it provides
 
-- `data.py` owns the dataset.
-- `model.py` owns PyTorch models.
-- `evaluation.py` owns metrics.
-- `experiment.py` connects the ML pieces.
-- `storage.py` owns experiment artifacts.
-- `tools.py` exposes safe operations to Codex.
-- `agent.py` connects those tools to Theseus.
+- **Normal-only fitting.** Build a memory bank from pretrained image features,
+  then score new images by their distance from that bank. No backbone fine-tuning.
+- **Controlled experiments.** JSON configurations, command-line overrides, and
+  seeded data splitting and coreset selection.
+- **Inspectable results.** Per-image predictions alongside AUROC, memory bank
+  size, configuration, device information, and Git revision/dirty state.
+- **Performance tracing.** OpenTelemetry spans and CUDA event timings for feature
+  extraction, coreset selection, and evaluation. Compare runtime as well as accuracy.
 
-The experiment currently fits a normal memory bank, calibrates a threshold, and
-evaluates image AUROC. Pixel metrics and agent tools remain placeholders.
+## Quick start
 
-Run an experiment (the baseline JSON selects CUDA):
+Requires Python 3.12+ and `uv`. The default configuration uses an NVIDIA GPU with
+CUDA support; set `device` to `"cpu"` in the JSON to run on CPU.
 
-```bash
-.venv/bin/python -m visual_inspection.experiment --category grid --coreset-ratio 0.01
-```
-
-`--config` selects another JSON from `visual_inspection/configs/` (or an absolute
-path). Command-line overrides do not modify the JSON. Only `wide_resnet50_2` is
-supported; other backbone names raise an error.
-
-Each successful run returns a summary and saves two files under `runs/<run_id>/`:
-
-- `result.json`: effective config, AUROC, elapsed seconds, bank size, threshold,
-  split sizes, Git revision/dirty flag, PyTorch version and device name.
-- `predictions.json`: each test image's dataset-relative path, defect type, true
-  label and raw anomaly score. Larger scores mean more anomalous.
-
-Stage timings are saved in `result.json` under `cuda_stage_elapsed_ms`, keyed by
-span name (an empty dictionary on CPU), and in OpenTelemetry traces.
-The `experiment` span contains
-`feature extraction`, `coreset selection` and `evaluation` child spans. Each CUDA
-stage records `cuda.elapsed_ms`; CPU stages have ordinary span timing only.
-The small `StageTracer` helper in `telemetry.py` queues markers without waiting,
-collects their timings once at the end, and exports spans with the original stage
-end timestamps. CUDA intervals include idle gaps, not just active computation.
-Exceptions are recorded on their spans. Calibration is not separately timed.
-
-The command-line run's trace uses the same ID in `visual_inspection/traces/`.
-Generated runs and traces are ignored by Git. Failed runs raise an exception;
-they do not currently write a result summary. Model weights are not saved.
-
-The seed controls the data split, Python's coreset choice and PyTorch randomness.
-Coreset has its own random generator, so adding telemetry spans cannot change it.
-cuDNN uses deterministic convolution selection. This is intended for repeated
-runs in the same environment, not a promise of identical results across hardware
-or library versions. A dirty Git flag means the commit alone does not identify
-the exact code used.
-
-AUROC still uses your pairwise ranking rule, with half credit for ties. The
-comparisons now run as tensors on CPU, avoiding a GPU synchronization for every
-pair. The pair matrix is suitable for these per-category MVTec test sets, not
-arbitrarily large evaluation datasets.
-
-Keep results per category. Once test results guide model/config changes, treat
-them as development feedback rather than an untouched final evaluation.
-
-Focused metric and storage checks:
+From the repository root:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p test_evaluation_metrics.py -v
-.venv/bin/python -m unittest discover -s tests -p test_telemetry.py -v
+uv sync --locked
 ```
 
-GPU validation on 2026-09-09 (GTX 1660 SUPER, seed 42, image size 224,
-batch size 8, coreset ratio 0.01):
+Download MVTec AD separately and extract it under
+`data/mvtec_anomaly_detection/`, keeping its category folders intact. For example:
 
-| Category | Image AUROC | Bank rows | Test images | Run seconds |
-| --- | ---: | ---: | ---: | ---: |
-| grid | 0.994987 | 1662 | 78 | 52.7 |
-| grid, repeat | 0.994987 | 1662 | 78 | 52.4 |
-| cable | 0.979573 | 1411 | 150 | 49.8 |
+```text
+data/mvtec_anomaly_detection/grid/
+├── train/good/
+├── test/
+└── ground_truth/
+```
 
-Both grid runs produced exactly equal saved image scores and thresholds.
-Saved scores for both categories also reproduced AUROC using the original
-Python pairwise rule. Four focused tests passed, and an unsupported backbone
-was confirmed to raise an error. These are development results, not a claim
-about performance across all categories.
+Run an experiment:
+
+```bash
+uv run --locked python -m visual_inspection.experiment --category grid --coreset-ratio 0.01
+```
+
+The first run downloads pretrained Wide ResNet-50-2 weights if they are not cached.
+
+## Configuration
+
+The default config is
+[`visual_inspection/configs/patchcore__baseline.json`](visual_inspection/configs/patchcore__baseline.json):
+
+```json
+{
+  "category": "bottle",
+  "seed": 42,
+  "backbone": "wide_resnet50_2",
+  "batch_size": 8,
+  "image_size": 224,
+  "coreset_ratio": 0.001,
+  "device": "cuda"
+}
+```
+
+`coreset_ratio` controls the fraction of training patch embeddings retained in the
+memory bank. Larger banks increase storage and scoring cost; larger images produce
+more patches. Only `wide_resnet50_2` is currently supported.
+
+Use `--config` to select another JSON by filename in the config directory or by
+absolute path. `--category` and `--coreset-ratio` override it without changing the file.
+
+## Results and traces
+
+Each successful run writes to `runs/<run_id>/`:
+
+- `result.json`: image AUROC, threshold, bank size, split sizes, elapsed time,
+  CUDA stage timings, effective configuration, and environment/code metadata.
+- `predictions.json`: test image paths, labels, defect types, and anomaly scores.
+  Higher scores indicate greater anomaly.
+
+OpenTelemetry traces are saved in `visual_inspection/traces/` with the same run ID.
+CUDA timings measure elapsed intervals on the GPU stream, including idle gaps—not
+just active computation. Generated results and traces are ignored by Git.
+
+## Evaluation
+
+Each category gets its own memory bank. Normal training images are split 80/20:
+80% build the bank, and 20% calibrate a threshold at the 99th percentile of normal
+validation scores. Image AUROC is measured on the category's test set and does not
+depend on that threshold.
+
+Results across all 15 MVTec AD categories with seed 42, image size 224,
+batch size 8, and coreset ratio 0.01:
+
+| Category | Image AUROC | Memory bank vectors |
+| --- | ---: | ---: |
+| Bottle | 1.0000 | 1,317 |
+| Cable | 0.9796 | 1,411 |
+| Capsule | 0.9836 | 1,379 |
+| Carpet | 0.9831 | 1,756 |
+| Grid | 0.9950 | 1,662 |
+| Hazelnut | 1.0000 | 2,453 |
+| Leather | 1.0000 | 1,536 |
+| Metal nut | 1.0000 | 1,379 |
+| Pill | 0.9722 | 1,677 |
+| Screw | 0.9555 | 2,007 |
+| Tile | 1.0000 | 1,442 |
+| Toothbrush | 0.9000 | 376 |
+| Transistor | 0.9946 | 1,340 |
+| Wood | 0.9912 | 1,552 |
+| Zipper | 0.9958 | 1,505 |
+| **Mean across categories** | **0.9834** | — |
+
+These are single-seed, image-level development results. The mean gives each
+category equal weight. Seeds
+support repeat runs in the same environment; they do not guarantee identical
+results across hardware or library versions. If test scores guide configuration
+choices, that test set is no longer an untouched final evaluation.
+
+Pixel-level evaluation and saved model checkpoints are not implemented yet.
+Agent-driven experiment search is planned as a separate project using this engine.

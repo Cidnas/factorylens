@@ -164,13 +164,6 @@ class ExperimentRunner:
         print(f"Image AUROC: {evaluation['auroc_score']:.6f}")
         print(f"Saved run: {output_path}")
         return result
-
-
-
-
-
-
-        
         
 
 if __name__=="__main__":

@@ -1,29 +1,18 @@
 [project]
-name = "anomaly-detection"
+name = "factorylens"
 version = "0.1.0"
-description = "Anomaly Detection"
+description = "Industrial visual anomaly detection experiments"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.11.1",
-    "openai-agents>=0.22.0",
     "opentelemetry-api>=1.44.0",
     "opentelemetry-sdk>=1.44.0",
     "pillow>=12.3.0",
-    "python-dotenv>=1.2.3",
-    "theseus",
     "torch",
     "torchvision>=0.28.0",
     "tqdm>=4.70.0",
 ]
-
-[tool.uv.workspace]
-members = [
-    "packages/theseus",
-]
-
-[tool.uv.sources]
-theseus = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["visual_inspection"]
