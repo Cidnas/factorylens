@@ -78,8 +78,8 @@ Each successful run writes to `runs/<run_id>/`:
   Higher scores indicate greater anomaly.
 
 OpenTelemetry traces are saved in `visual_inspection/traces/` with the same run ID.
-CUDA timings measure elapsed intervals on the GPU stream, including idle gaps—not
-just active computation. Generated results and traces are ignored by Git.
+Together, scores and stage timings help compare detection quality against runtime
+and identify which stages become more expensive as configurations change.
 
 ## Evaluation
 
